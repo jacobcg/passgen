@@ -1,0 +1,172 @@
+#! /bin/bash
+
+#set -x
+
+#Default characters
+UPPER="A-Z"
+LOWER="a-z"
+DIGITS="0-9"
+SYMBOLS="@#$%&*"
+
+#Default length / repititions / flags
+LENGTH=8
+REPS=0
+REPFLAG='false'
+ACCTFLAG='false'
+LFLAG='false'
+UFLAG='false'
+DFLAG='false'
+SFLAG='false'
+EFLAG='false'
+
+#Gather arguments
+argumentString="$@"
+
+#Regex variables
+
+#Gets length, accepts negative number for personal error message.
+lengthRegex="(\-\S*)(n)\s?(\-?[0-9]+)"
+
+#Grabs charset arguments and to check for rep and username arguments
+modRegex="\-\S*(l|u|d|s|e){1,}"
+
+#Grabs repitition command, accepts negative number to output error.
+repRegex="(\-?\S*)(r)\s?(\-?[0-9]+)"
+
+#Grabs user argument with associated username
+userRegex="(\-\S*p)\s?([a-zA-Z0-9\.@_]*)"
+
+#Check to see if any charset arguments are given
+if [[ $argumentString =~ $modRegex ]]; then
+    
+    #Grab the length for a substring
+    matchLength=$((${#BASH_REMATCH[0]}-1))
+
+    #Grab a string of all our arguments sans dash
+    args=${BASH_REMATCH[0]:1:$matchLength}
+fi
+
+#Check to see if length should be changed.
+if [[ $argumentString =~ $lengthRegex ]]; then
+
+    LENGTH=${BASH_REMATCH[3]}
+
+    #Check for negative lengths.
+    if [ $LENGTH -le 0 ]; then
+	>&2 echo "passgen: invalid -n argument '$LENGTH', value must be greater than zero."
+	exit 1
+    fi
+fi
+
+
+#Check to see if rep argument given
+if [[ $argumentString =~ $repRegex ]]; then
+
+    REPS=${BASH_REMATCH[3]}
+
+    #Check if negative number was given
+    if [ $REPS -le 0 ]; then
+	>&2 echo "passgen: invalid -r argument '$REPS', value must be greater than zero."
+	exit 1
+    fi
+fi
+
+#Going through the argstring to change flags
+i=0
+
+while [[ $i -lt ${#args} ]]; do
+    case ${args:$i:1} in
+	l) LFLAG='true'
+	   ;;&
+	s) SFLAG='true'
+	   ;;&
+	u) UFLAG='true'
+	   ;;&
+	d) DFLAG='true'
+	   ;;&
+	e) EFLAG='true'
+	   ;;&
+	*) ;;
+    esac
+
+    i=$(($i+1))
+done
+
+#Checking if default flag should be set
+if [ $LFLAG = 'false' -a $UFLAG = 'false' -a $DFLAG = 'false' -a $SFLAG = 'false' ]; then
+    LFLAG='true'
+fi
+
+#Changing charsets if easy flag was chosen
+if [ $EFLAG = 'true' ]; then
+    LOWER="a-km-z"
+    UPPER="A-HJ-NP-Z"
+    DIGITS="2-9"
+fi
+
+CHARS=""
+
+if [ $LFLAG = 'true' ]; then
+    CHARS="$LOWER$CHARS"
+fi
+if [ $UFLAG = 'true' ]; then
+    CHARS="$UPPER$CHARS"
+fi
+if [ $DFLAG = 'true' ]; then
+    CHARS="$DIGITS$CHARS"
+fi
+if [ $SFLAG = 'true' ]; then
+    CHARS="$SYMBOLS$CHARS"
+fi
+
+
+#Check if -p flag was provided
+if [[ $argumentString =~ $userRegex ]]; then
+
+    #If -r flag also provided, kill program
+    if [ $REPS -gt 0 ]; then
+	>&2 echo "passgen: -r option and -p option are mutually exclusive."
+	exit 1
+    #If rematch doesn't have anything in 2nd slot, no username given
+    elif [[ ${BASH_REMATCH[2]} = "" ]]; then
+	>&2 echo "passgen: No username given with -p option."
+	exit 1
+    else
+	username=${BASH_REMATCH[2]}
+    fi
+
+    #Search for the username in shadow to see if it exists
+    userSearch="$( sudo cat /etc/shadow | grep -o $username )"
+
+    if [[ "$userSearch" == "$username" ]]; then
+
+	#Generate password
+	password="$( tr -dc $CHARS < /dev/urandom | head -c$LENGTH )"
+
+	#Assign new password, I direct this to null so it doesn't clutter things.
+	echo -e "$password\n$password" | sudo passwd "$username" &> /dev/null
+
+	#Check that passwd command worked
+	if [ $? -eq 0 ]; then
+	    echo "Password changed successfully."
+	    echo "User: $username"
+	    echo "Password: $password"
+	else
+	    >&2 echo "passgen: Password change failed."
+	    exit 1
+	fi
+    else
+	>&2 echo "passgen: Username not found."
+	exit 1
+    fi
+fi	
+
+if [[ $REPS -gt 0 ]]; then
+    i=0
+    while [[ $i -lt $REPS ]]; do
+	echo `tr -dc $CHARS < /dev/urandom | head -c$LENGTH`;echo;
+	i=$(($i+1))
+    done
+else
+    echo `tr -dc $CHARS < /dev/urandom | head -c$LENGTH`;echo;
+fi
